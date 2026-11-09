@@ -3,7 +3,7 @@
 // after each move is the only storage the worker needs.
 
 import type { State } from './engine.ts';
-import { isValidState } from './engine.ts';
+import { isValidState, spawnX } from './engine.ts';
 
 export function b64urlEncode(str: string): string {
   const bytes = new TextEncoder().encode(str);
@@ -27,6 +27,13 @@ export function encodeState(s: State): string {
 export function decodeState(payload: string): State | null {
   try {
     const raw = JSON.parse(b64urlDecode(payload));
+    if (!raw || typeof raw !== 'object') return null;
+    // States written before the falling piece had a position: put it at spawn.
+    if (typeof raw.x !== 'number' || typeof raw.y !== 'number') {
+      if (!Number.isInteger(raw.p) || !Number.isInteger(raw.r)) return null;
+      raw.x = spawnX(raw.p, raw.r);
+      raw.y = 0;
+    }
     if (!isValidState(raw)) return null;
     return raw as State;
   } catch {

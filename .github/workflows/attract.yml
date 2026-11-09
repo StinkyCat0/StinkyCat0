@@ -1,0 +1,22 @@
+name: back to the bot
+
+# A finished game leaves the board showing GAME OVER. Nobody wants that as the
+# first thing on a profile, and nothing else runs on this repo, so a scheduled
+# ping hands the board back to the attract loop whenever the game is finished.
+# ?if=over makes it a no-op while somebody is mid-game.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  attract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: hand the board back if the game is over
+        run: |
+          url="https://stinky-tetris.antonio-devine111.workers.dev/w?if=over"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 30 "$url")
+          echo "worker answered $code"
+          test "$code" = "302"

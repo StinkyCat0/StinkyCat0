@@ -6,7 +6,7 @@ import { applyMove, newGame } from '../game/engine.ts';
 import type { Move, State } from '../game/engine.ts';
 import { renderBoard } from '../game/render.ts';
 import { decodeState, randomSeed } from '../game/state.ts';
-import { buildReadme, extractStatePayload } from './readme.ts';
+import { buildAttract, buildReadme, extractStatePayload } from './readme.ts';
 
 interface Env {
   GITHUB_TOKEN: string;
@@ -92,7 +92,10 @@ async function getTemplate(env: Env): Promise<string> {
 function describe(move: Move, next: State): string {
   if (move.type === 'new') return 'tetris: new game';
   if (move.type === 'rot') return `tetris: rotate ${next.p}`;
-  return `tetris: drop in column ${Math.floor(move.col) + 1}`;
+  if (move.type === 'drop') return `tetris: drop in column ${Math.floor(move.col) + 1}`;
+  if (move.type === 'hard') return 'tetris: hard drop';
+  if (move.type === 'down') return 'tetris: soft drop';
+  return `tetris: nudge ${move.type}`;
 }
 
 /**
@@ -145,6 +148,28 @@ function page(title: string, body: string): Response {
   );
 }
 
+/** Back to the profile. The query string beats the profile page's CDN cache:
+ *  a move that lands but reloads an old page reads as a dead click. */
+function bounce(env: Env, moves: number): Response {
+  return Response.redirect(`${env.PROFILE_URL}?b=${moves}`, 302);
+}
+
+/** Hand the board back to the bot. With onlyIfOver, a live human game is left alone. */
+async function toAttract(env: Env, base: string, onlyIfOver: boolean): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const [readme, template] = await Promise.all([getFile(env, 'README.md'), getTemplate(env)]);
+    const payload = readme ? extractStatePayload(readme.text) : null;
+    const state = payload ? decodeState(payload) : null;
+    if (onlyIfOver && state && !state.ov) return false;
+    const body = buildAttract(template, base, env.PROFILE_URL);
+    if (await putFile(env, 'README.md', body, readme?.sha ?? null, 'tetris: back to the attract loop')) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 110));
+  }
+  return false;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -166,7 +191,7 @@ export default {
       });
     }
 
-    if (path === '/m' || path === '/r' || path === '/n') {
+    if (path === '/m' || path === '/r' || path === '/n' || path === '/k') {
       const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
       if (!allow(ip)) {
         return page(
@@ -174,12 +199,24 @@ export default {
           `<p>that is a lot of tetris.</p><p><a href="${env.PROFILE_URL}" style="color:#8ef7ac">back to the board</a></p>`,
         );
       }
+
+      // The pad's five keys are just moves; /m is the column click and /n a
+      // fresh deal, so a stale page can never replay a move into a wrong board.
+      const KEYS: Record<string, Move> = {
+        l: { type: 'left' },
+        r: { type: 'right' },
+        u: { type: 'rot' },
+        d: { type: 'down' },
+        s: { type: 'hard' },
+      };
       const move: Move =
         path === '/m'
           ? { type: 'drop', col: Number(url.searchParams.get('c') ?? '0') }
           : path === '/r'
             ? { type: 'rot' }
-            : { type: 'new', seed: randomSeed() };
+            : path === '/n'
+              ? { type: 'new', seed: randomSeed() }
+              : (KEYS[url.searchParams.get('k') ?? 'd'] ?? KEYS.d);
 
       if (move.type === 'drop' && !(Number.isFinite(move.col) && move.col >= 0 && move.col <= 9)) {
         return Response.redirect(env.PROFILE_URL, 302);
@@ -188,9 +225,7 @@ export default {
       try {
         const next = await play(env, move, url.origin);
         if (!next) throw new Error('no write landed');
-        // The query string is there to beat the profile page's own CDN cache:
-        // a move that lands but reloads an old page reads as a dead click.
-        return Response.redirect(`${env.PROFILE_URL}?b=${next.mv}`, 302);
+        return bounce(env, next.mv);
       } catch (err) {
         console.error('play failed', err);
         return page(
@@ -199,6 +234,32 @@ export default {
             `<p><a href="${env.PROFILE_URL}" style="color:#8ef7ac">back to the board</a></p>`,
         );
       }
+    }
+
+    // Take over from the bot: a fresh board, yours.
+    if (path === '/p') {
+      if (!allow(request.headers.get('cf-connecting-ip') ?? 'anon')) {
+        return page('slow down', `<p><a href="${env.PROFILE_URL}" style="color:#8ef7ac">back to the board</a></p>`);
+      }
+      try {
+        const next = await play(env, { type: 'new', seed: randomSeed() }, url.origin);
+        if (!next) throw new Error('no write landed');
+        return bounce(env, next.mv);
+      } catch (err) {
+        console.error('start failed', err);
+        return page('could not start a game', `<p><a href="${env.PROFILE_URL}" style="color:#8ef7ac">back to the board</a></p>`);
+      }
+    }
+
+    // Hand the board back to the bot. ?if=over makes it a no-op unless the
+    // game is finished, which is what the scheduled reset uses.
+    if (path === '/w') {
+      try {
+        await toAttract(env, url.origin, url.searchParams.get('if') === 'over');
+      } catch (err) {
+        console.error('attract failed', err);
+      }
+      return bounce(env, 0);
     }
 
     if (path === '/') return Response.redirect(env.PROFILE_URL, 302);

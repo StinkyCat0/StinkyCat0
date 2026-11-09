@@ -7,7 +7,7 @@
 // cleared lines flashing out). SMIL runs inside an <img>, which is the only
 // moving thing GitHub lets a README have.
 
-import { CLEAR_SCORE, H, SHAPES, W, decodeBoard, spawnX, upcoming } from './engine.ts';
+import { CLEAR_SCORE, H, SHAPES, W, decodeBoard, ghostY, upcoming } from './engine.ts';
 import type { State } from './engine.ts';
 
 const CELL = 24;
@@ -78,7 +78,7 @@ function skipCells(s: State): Set<number> {
   const an = s.an;
   if (an && an.kind === 'drop') {
     for (const [cx, cy] of SHAPES[an.piece][an.rot]) {
-      const x = an.left + cx;
+      const x = an.x + cx;
       const y = an.y1 + cy;
       if (x >= 0 && x < W && y >= 0 && y < H) set.add(y * W + x);
     }
@@ -111,7 +111,7 @@ export function renderBoard(s: State): string {
   if (an && an.kind === 'drop') {
     const dy = (an.y0 - an.y1) * CELL;
     const inner = SHAPES[an.piece][an.rot]
-      .map(([cx, cy]) => block(an.left + cx, an.y1 + cy, an.piece))
+      .map(([cx, cy]) => block(an.x + cx, an.y1 + cy, an.piece))
       .join('');
     if (dy !== 0 && s.mv > 0) {
       moving =
@@ -140,19 +140,41 @@ export function renderBoard(s: State): string {
     }
   }
 
-  // The next piece holds back until the drop lands.
+  // Ghost: where a hard drop would land. Dotted, so the keypad has a landing guide.
+  let ghost = '';
+  if (!s.ov) {
+    const gy = ghostY(s);
+    if (gy !== s.y) {
+      ghost = SHAPES[s.p][s.r]
+        .map(([cx, cy]) => {
+          const px = WELL_X + (s.x + cx) * CELL;
+          const py = WELL_Y + (gy + cy) * CELL;
+          return `<rect x="${px + 2}" y="${py + 2}" width="${CELL - 4}" height="${CELL - 4}" rx="2" fill="none" stroke="${FILL[s.p]}" stroke-opacity="0.45" stroke-width="1.4" stroke-dasharray="3 2"/>`;
+        })
+        .join('');
+    }
+  }
+
+  // The falling piece: at its current position, sliding down one row when the
+  // last move was a soft drop, or fading in after the previous piece settled.
   let spawned = '';
-  if (an && an.kind === 'drop' && !s.ov) {
-    const x = spawnX(s.p, s.r);
-    const cellsHtml = SHAPES[s.p][s.r].map(([cx, cy]) => block(x + cx, cy, s.p)).join('');
-    spawned =
-      `<g opacity="0">` +
-      `<animate attributeName="opacity" values="0;1" dur="0.06s" begin="0.22s" fill="freeze"/>` +
-      cellsHtml +
-      `</g>`;
-  } else if (!s.ov && (!an || an.kind !== 'drop')) {
-    const x = spawnX(s.p, s.r);
-    spawned = SHAPES[s.p][s.r].map(([cx, cy]) => block(x + cx, cy, s.p)).join('');
+  if (!s.ov) {
+    const cellsHtml = SHAPES[s.p][s.r].map(([cx, cy]) => block(s.x + cx, s.y + cy, s.p)).join('');
+    if (an && an.kind === 'drop') {
+      spawned =
+        `<g opacity="0">` +
+        `<animate attributeName="opacity" values="0;1" dur="0.06s" begin="0.22s" fill="freeze"/>` +
+        cellsHtml +
+        `</g>`;
+    } else if (an && an.kind === 'fall') {
+      spawned =
+        `<g>` +
+        `<animateTransform attributeName="transform" type="translate" values="0 ${(an.from - s.y) * CELL};0 0" dur="0.09s" begin="0s" fill="freeze"/>` +
+        cellsHtml +
+        `</g>`;
+    } else {
+      spawned = cellsHtml;
+    }
   }
 
   // Column ruler, matching the 1..10 keypad under the board.
@@ -184,7 +206,7 @@ export function renderBoard(s: State): string {
     `<rect width="${SVG_W}" height="${SVG_H}" rx="7" fill="#040907"/>` +
     `<rect x="${WELL_X}" y="${WELL_Y}" width="${W * CELL}" height="${H * CELL}" fill="#061109" stroke="#1d4c31" stroke-width="1"/>` +
     grid +
-    `<g filter="url(#glow)">${blocks}${moving}${spawned}</g>` +
+    `<g filter="url(#glow)">${ghost}${blocks}${moving}${spawned}</g>` +
     after +
     over +
     `<rect x="${WELL_X}" y="${WELL_Y}" width="${W * CELL}" height="${H * CELL}" fill="url(#scan)" opacity="0.16"/>` +

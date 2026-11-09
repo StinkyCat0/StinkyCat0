@@ -57,11 +57,25 @@ implies the bytes, caching it forever is free and correct.
 
 ## Move model
 
-- Board: 264x548 SVG — 10x20 well, HUD (score, lines, next), 1-10 ruler under the well.
-- One click per piece: click a column, the piece slides there and drops.
-- `rotate` reloads the board with the piece rotated, then you pick a column. That is
-  rotate-then-place, like the real keys, at the cost of one reload.
-- Game over: the well dims and shows lines and points; the keypad becomes `new game`.
+There are two views of the same profile, decided by whether the README carries a board:
+
+**attract** — the bot plays itself. `attract.svg` is a 33s SMIL loop of a real game (a
+greedy height/holes/bumpiness bot: 60 pieces, 20 lines, 2300 points), 67 KB, no state, no
+requests, no reloads. One button: `▶ let me play`.
+
+**play** — a live board for the human.
+
+- Click a **number** to slide the piece over that column and drop it: one click per piece.
+- Or use the five-key pad, which is the arrow-key scheme spelled as clicks:
+  `◀ ▶` nudge a column, `↻` rotate, `▼` down one row, `⤓` slam it to the floor.
+  A ghost piece shows where the slam would land.
+- Game over: the well dims with the run's lines and points, and the page offers
+  `▶ play again` and `◀ watch the bot`. A scheduled workflow pings `/w?if=over` every six
+  hours, so a finished game can never sit on the profile overnight.
+
+Keys cannot be real: a README runs no JavaScript, so no element can receive a keypress,
+and every click is a page load (~1.5s). The pad is honest about that — each key is one
+reload, which is why the column click stays the fast path.
 
 ## Decisions
 

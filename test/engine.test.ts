@@ -7,9 +7,11 @@ import {
   applyMove,
   decodeBoard,
   encodeBoard,
+  ghostY,
   newGame,
   spawnX,
   upcoming,
+  width,
 } from '../game/engine.ts';
 import type { State } from '../game/engine.ts';
 
@@ -134,4 +136,52 @@ test('200 random moves never corrupt the state', () => {
     assert.ok(cells.every((c) => Number.isInteger(c) && c >= 0 && c <= 7));
     assert.ok(s.sc >= 0 && s.ln >= 0);
   }
+});
+
+test('the pad keys move the piece instead of dealing a new one', () => {
+  const start = newGame(31);
+  const left = applyMove(start, { type: 'left' });
+  const right = applyMove(start, { type: 'right' });
+  assert.equal(left.x, start.x - 1);
+  assert.equal(right.x, start.x + 1);
+  assert.equal(left.mv, start.mv, 'still the same piece');
+});
+
+test('the piece cannot walk through the walls', () => {
+  let s = newGame(31);
+  for (let i = 0; i < 12; i++) s = applyMove(s, { type: 'left' });
+  assert.equal(s.x, 0, 'clamped at the left wall');
+  for (let i = 0; i < 16; i++) s = applyMove(s, { type: 'right' });
+  assert.equal(s.x, W - width(s.p, s.r), 'clamped at the right wall');
+});
+
+test('soft drop moves one row at a time', () => {
+  const s = newGame(31);
+  const down = applyMove(s, { type: 'down' });
+  assert.equal(down.y, s.y + 1);
+  assert.equal(down.mv, s.mv);
+});
+
+test('hard drop settles the piece and deals the next one', () => {
+  const s = newGame(31);
+  const after = applyMove(s, { type: 'hard' });
+  assert.equal(after.mv, s.mv + 1, 'the next piece is up');
+  assert.equal(after.y, 0, 'and it starts at the top');
+  assert.ok(decodeBoard(after.b).slice((H - 1) * W).some((c) => c !== 0), 'something landed');
+});
+
+test('the ghost sits exactly where the hard drop lands', () => {
+  for (const seed of [5, 77, 2026]) {
+    const s = applyMove(newGame(seed), { type: 'drop', col: 3 });
+    const target = ghostY(s);
+    const dropped = applyMove(s, { type: 'hard' });
+    assert.ok(dropped.an && dropped.an.kind === 'drop');
+    assert.equal(target, dropped.an.y1, 'ghost and landing row agree');
+  }
+});
+
+test('a soft drop that cannot descend locks the piece', () => {
+  let s = newGame(31);
+  for (let i = 0; i < H + 4; i++) s = applyMove(s, { type: 'down' });
+  assert.equal(s.mv, 1, 'it locked exactly once');
 });

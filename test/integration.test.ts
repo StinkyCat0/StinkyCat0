@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import worker from '../worker/index.ts';
+import { decodeState } from '../game/state.ts';
 
 const enc = (s: string) => Buffer.from(s, 'utf8').toString('base64');
 const dec = (s: string) => Buffer.from(s.replace(/\n/g, ''), 'base64').toString('utf8');
@@ -93,7 +94,8 @@ test('a first click starts a game and commits the README', async () => {
   assert.ok(md.includes('My name is Antonio Devine'));
   assert.ok(md.includes('<table align="center">'), 'the keypad is there');
   assert.equal((md.match(/\/m\?c=/g) ?? []).length, 10, 'ten columns');
-  assert.ok(md.includes('/r'), 'the rotate control is there');
+  assert.ok(md.includes('/k?k=u'), 'the rotate key is on the pad');
+  assert.ok(md.includes('/k?k=s'), 'the slam key is on the pad');
 });
 
 test('the board image renders and changes with every move', async () => {
@@ -138,8 +140,8 @@ test('six hundred moves of real play stay coherent', async () => {
     const svg = await (await visit(`/b/${p}.svg`)).text();
     assert.ok(!svg.includes('NaN'));
     if (md.includes('/n')) {
-      // game over: the keypad is replaced by a new-game link, then start again
-      assert.ok(md.includes('new game'));
+      // game over: the pad is replaced by play-again and watch-the-bot
+      assert.ok(md.includes('play again'));
       await visit('/n');
     }
   }
@@ -190,4 +192,71 @@ test('a broken board payload is a clean 404', async () => {
   seedRepo();
   const res = await visit('/b/notastate.svg');
   assert.equal(res.status, 404);
+});
+
+test('the board starts as the bot playing itself, with one way in', async () => {
+  seedRepo();
+  const res = await visit('/w');
+  assert.equal(res.status, 302);
+  const md = await readme();
+  assert.ok(md.includes('attract.svg'), 'the looping bot game is on the profile');
+  assert.ok(md.includes('/p'), 'and there is a let me play button');
+  assert.ok(!md.includes('/b/'), 'no live board image while the bot plays');
+});
+
+test('let me play deals a fresh board with the whole pad', async () => {
+  seedRepo();
+  await visit('/w');
+  assert.equal((await visit('/p')).status, 302);
+  const md = await readme();
+  assert.ok(md.includes('/b/'), 'a live board now');
+  for (const k of ['l', 'r', 'u', 'd', 's']) assert.ok(md.includes(`/k?k=${k}`), `key ${k}`);
+  assert.equal((md.match(/\/m\?c=/g) ?? []).length, 10, 'ten columns');
+  const state = decodeState(payloadOf(md));
+  assert.ok(state && !state.ov);
+  assert.equal(state.mv, 0, 'a clean board');
+});
+
+test('a pad key moves the piece without dealing a new one', async () => {
+  seedRepo();
+  await visit('/p');
+  const before = decodeState(payloadOf(await readme()));
+  assert.equal((await visit('/k?k=l')).status, 302);
+  const after = decodeState(payloadOf(await readme()));
+  assert.ok(before && after);
+  assert.equal(after.mv, before.mv, 'same piece');
+  assert.notEqual(after.x, before.x, 'it moved one column');
+});
+
+test('a finished game offers play again and watch the bot', async () => {
+  seedRepo();
+  await visit('/p');
+  for (let i = 0; i < 300; i++) {
+    const s = decodeState(payloadOf(store.get('README.md')!.content));
+    if (s?.ov) break;
+    await visit('/m?c=0');
+  }
+  const md = await readme();
+  assert.ok(md.includes('run over'), 'the result is on the page');
+  assert.ok(md.includes('/n'), 'play again');
+  assert.ok(md.includes('/w'), 'watch the bot');
+});
+
+test('the scheduled reset leaves a live game alone', async () => {
+  seedRepo();
+  await visit('/p');
+  await visit('/m?c=4');
+  const before = await readme();
+  await visit('/w?if=over');
+  assert.equal(await readme(), before, 'a game in progress is not wiped');
+});
+
+test('watch the bot takes the board back', async () => {
+  seedRepo();
+  await visit('/p');
+  await visit('/m?c=2');
+  await visit('/w');
+  const md = await readme();
+  assert.ok(md.includes('attract.svg'));
+  assert.ok(!md.includes('/b/'));
 });

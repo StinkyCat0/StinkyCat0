@@ -212,12 +212,20 @@ for (const rots of Object.values(SHAPES)) {
   }
 }
 
-export type Move = { type: 'drop'; col: number } | { type: 'rot' } | { type: 'new'; seed: number };
+export type Move =
+  | { type: 'drop'; col: number } // column click: slide to that column, then fall
+  | { type: 'left' }
+  | { type: 'right' }
+  | { type: 'down' } // one row, or lock if it cannot go further
+  | { type: 'hard' } // fall as far as it can, then lock
+  | { type: 'rot' }
+  | { type: 'new'; seed: number };
 
 /** What the renderer animates. Only ever describes the move that just happened. */
 export type Anim =
-  | { kind: 'drop'; piece: number; rot: number; left: number; y0: number; y1: number; cleared: number[] }
-  | { kind: 'rot'; piece: number; rot: number; left: number }
+  | { kind: 'drop'; piece: number; rot: number; x: number; y0: number; y1: number; cleared: number[] }
+  | { kind: 'fall'; from: number }
+  | { kind: 'move' }
   | { kind: 'new' }
   | { kind: 'over' };
 
@@ -229,6 +237,10 @@ export type State = {
   p: number;
   /** current rotation, 0..3 */
   r: number;
+  /** left edge of the falling piece */
+  x: number;
+  /** top edge of the falling piece */
+  y: number;
   /** upcoming pieces, digits */
   q: string;
   /** how many bags have been shuffled so far (drives the PRNG) */
@@ -341,6 +353,8 @@ export function newGame(seed: number): State {
     b: encodeBoard(emptyBoard()),
     p: 0,
     r: 0,
+    x: 0,
+    y: 0,
     q: '',
     bc: 0,
     sd: seed,
@@ -353,6 +367,8 @@ export function newGame(seed: number): State {
   ensureQueue(s, 8);
   s.p = Number(s.q[0]);
   s.r = 0;
+  s.x = spawnX(s.p, s.r);
+  s.y = 0;
   s.q = s.q.slice(1);
   return s;
 }
@@ -362,63 +378,35 @@ export function upcoming(s: State, n: number): number[] {
   return s.q.slice(0, n).split('').map(Number);
 }
 
+/** Where a hard drop would land, for the ghost piece. */
+export function ghostY(s: State): number {
+  const cells = decodeBoard(s.b);
+  let y = s.y;
+  while (fits(cells, s.p, s.r, s.x, y + 1)) y++;
+  return y;
+}
+
 function spawnNext(s: State): void {
   ensureQueue(s, 8);
   s.p = Number(s.q[0]);
   s.r = 0;
+  s.x = spawnX(s.p, s.r);
+  s.y = 0;
   s.q = s.q.slice(1);
   s.mv++;
   const cells = decodeBoard(s.b);
-  if (!fits(cells, s.p, s.r, spawnX(s.p, s.r), 0)) {
+  if (!fits(cells, s.p, s.r, s.x, s.y)) {
     s.ov = true;
     s.an = { kind: 'over' };
   }
 }
 
-export function applyMove(state: State, move: Move): State {
-  const s: State = JSON.parse(JSON.stringify(state));
-  s.an = null;
-
-  if (move.type === 'new') return newGame(move.seed);
-  if (s.ov) return s;
-
-  if (move.type === 'rot') {
-    const next = (s.r + 1) % 4;
-    // Rotation happens at the spawn anchor, so only the top rows can block it.
-    // Try the in-place rotation, then a one-cell nudge either way.
-    const x = spawnX(s.p, s.r);
-    const cells = decodeBoard(s.b);
-    let placed: number | null = null;
-    for (const dx of [0, -1, 1, -2, 2]) {
-      const left = x + dx;
-      if (fits(cells, s.p, next, left, 0)) {
-        placed = left;
-        break;
-      }
-    }
-    if (placed === null) return s; // blocked: no-op, the board stays put
-    s.r = next;
-    s.an = { kind: 'rot', piece: s.p, rot: s.r, left: placed };
-    return s;
-  }
-
-  // drop
-  const col = Math.max(0, Math.min(W - 1, Math.floor(move.col)));
-  const w = width(s.p, s.r);
-  const left = Math.max(0, Math.min(W - w, col - Math.floor((w - 1) / 2)));
-  const cells = decodeBoard(s.b);
-
-  if (!fits(cells, s.p, s.r, left, 0)) {
-    s.ov = true;
-    s.an = { kind: 'over' };
-    return s;
-  }
-
-  let top = 0;
-  while (fits(cells, s.p, s.r, left, top + 1)) top++;
-
-  for (const [cx, cy] of SHAPES[s.p][s.r]) {
-    cells[(top + cy) * W + left + cx] = s.p;
+/** Settle the falling piece, score whatever it completed, and deal the next one. */
+function lockPiece(s: State, cells: number[], from: number): void {
+  const piece = s.p;
+  const rot = s.r;
+  for (const [cx, cy] of SHAPES[piece][rot]) {
+    cells[(s.y + cy) * W + s.x + cx] = piece;
   }
 
   // clear lines
@@ -434,10 +422,76 @@ export function applyMove(state: State, move: Move): State {
   s.sc += CLEAR_SCORE[cleared.length] ?? 0;
   s.ln += cleared.length;
 
-  const anim: Anim = { kind: 'drop', piece: s.p, rot: s.r, left, y0: 0, y1: top, cleared };
-
+  const anim: Anim = { kind: 'drop', piece, rot, x: s.x, y0: from, y1: s.y, cleared };
   spawnNext(s);
   if (!s.ov) s.an = anim;
+}
+
+export function applyMove(state: State, move: Move): State {
+  const s: State = JSON.parse(JSON.stringify(state));
+  s.an = null;
+
+  if (move.type === 'new') return newGame(move.seed);
+  if (s.ov) return s;
+
+  const cells = decodeBoard(s.b);
+
+  // A piece that cannot stand where it is has nowhere to go: the stack reached
+  // the top. Locking it there would overwrite settled cells.
+  if (!fits(cells, s.p, s.r, s.x, s.y)) {
+    s.ov = true;
+    s.an = { kind: 'over' };
+    return s;
+  }
+
+  if (move.type === 'rot') {
+    const next = (s.r + 1) % 4;
+    // Rotating in place first, then nudging one step either way, then two.
+    for (const dx of [0, -1, 1, -2, 2]) {
+      if (fits(cells, s.p, next, s.x + dx, s.y)) {
+        s.r = next;
+        s.x += dx;
+        s.an = { kind: 'move' };
+        return s;
+      }
+    }
+    return s; // blocked: no-op, the board stays put
+  }
+
+  if (move.type === 'left' || move.type === 'right') {
+    const nx = s.x + (move.type === 'left' ? -1 : 1);
+    if (fits(cells, s.p, s.r, nx, s.y)) {
+      s.x = nx;
+      s.an = { kind: 'move' };
+    }
+    return s;
+  }
+
+  const from = s.y;
+
+  if (move.type === 'down') {
+    if (fits(cells, s.p, s.r, s.x, s.y + 1)) {
+      s.y += 1;
+      s.an = { kind: 'fall', from };
+    } else {
+      lockPiece(s, cells, from);
+    }
+    return s;
+  }
+
+  if (move.type === 'hard') {
+    while (fits(cells, s.p, s.r, s.x, s.y + 1)) s.y++;
+    lockPiece(s, cells, from);
+    return s;
+  }
+
+  // Column click: slide the piece over that column, then let it fall.
+  const col = Math.max(0, Math.min(W - 1, Math.floor(move.col)));
+  const w = width(s.p, s.r);
+  const target = Math.max(0, Math.min(W - w, col - Math.floor((w - 1) / 2)));
+  if (fits(cells, s.p, s.r, target, s.y)) s.x = target;
+  while (fits(cells, s.p, s.r, s.x, s.y + 1)) s.y++;
+  lockPiece(s, cells, from);
   return s;
 }
 
@@ -448,6 +502,8 @@ export function isValidState(s: unknown): s is State {
   if (typeof o.b !== 'string' || typeof o.q !== 'string') return false;
   if (!Number.isInteger(o.p) || o.p < 1 || o.p > 7) return false;
   if (!Number.isInteger(o.r) || o.r < 0 || o.r > 3) return false;
+  if (!Number.isInteger(o.x) || o.x < 0 || o.x >= W) return false;
+  if (!Number.isInteger(o.y) || o.y < 0 || o.y >= H) return false;
   if (!Number.isInteger(o.sc) || o.sc < 0 || o.sc > 10_000_000) return false;
   if (!Number.isInteger(o.ln) || o.ln < 0 || o.ln > 100_000) return false;
   if (!Number.isInteger(o.mv) || o.mv < 0) return false;
