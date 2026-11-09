@@ -1,0 +1,19 @@
+{
+  "name": "stinky-profile",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A playable Tetris at the top of github.com/StinkyCat0",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy",
+    "logs": "npx wrangler tail"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.42.0"
+  }
+}

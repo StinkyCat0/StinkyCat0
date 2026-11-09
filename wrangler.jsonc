@@ -1,0 +1,12 @@
+{
+  "name": "stinky-tetris",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "GITHUB_REPO": "StinkyCat0/StinkyCat0",
+    "PROFILE_URL": "https://github.com/StinkyCat0"
+  }
+}
