@@ -1,6 +1,7 @@
-// Prototype: an attract-mode loop. A greedy bot plays a 40-line sprint, every
-// frame is snapshotted, and the frames become one looping SMIL animation with
-// visibility windows, a progress bar toward 40 lines, and an elapsed timer.
+// An attract-mode loop. A greedy bot plays a 40-line sprint, every frame is
+// snapshotted, and the frames become one looping SMIL animation: the settled
+// stack is drawn once as per-cell windows, each piece falls from its spawn row
+// (never painted at its landing spot first), and the HUD tracks the sprint.
 // Run: node --experimental-strip-types scripts/attract.ts
 import { writeFileSync } from 'node:fs';
 
@@ -93,7 +94,8 @@ while (s.ln < GOAL && !s.ov && shots.length < 250) {
   shots.push(s);
 }
 
-const LOOP = shots.length * HOLD;
+// Rounded so `dur` is a clean number; keyTimes use the same value.
+const LOOP = +(shots.length * HOLD).toFixed(3);
 
 // ---------------------------------------------------------------- HUD helpers
 
@@ -135,40 +137,78 @@ function keyTimes(...fractions: number[]): string {
   return fractions.map((f) => f.toFixed(6)).join(';');
 }
 
+const boards = shots.map((shot) => cells(shot));
+const frames = shots.length;
+
+/**
+ * The settled stack, drawn once for the whole loop.
+ *
+ * Each cell emits one node per run of frames where it holds a value, and that
+ * node is shown by a discrete opacity window. So the file grows with placements
+ * and clears, not with frames x cells. Redrawing the stack inside every frame
+ * duplicated the whole board ~50 times by the end of the sprint, so the loop
+ * got heavier exactly as the stack grew.
+ */
+function boardLayer(): string {
+  const out: string[] = [];
+
+  function run(value: number, idx: number, start: number, end: number): string {
+    const el = `<use href="#c${value}" x="${PAD + (idx % W) * CELL}" y="${WELL_TOP + ((idx / W) | 0) * CELL}"`;
+    if (start === 0 && end === frames) return `${el}/>`; // occupied all loop
+    let values: string;
+    let keys: string;
+    if (start === 0) {
+      values = '1;0';
+      keys = keyTimes(0, (end * HOLD) / LOOP);
+    } else if (end === frames) {
+      values = '0;1';
+      keys = keyTimes(0, (start * HOLD) / LOOP);
+    } else {
+      values = '0;1;0';
+      keys = keyTimes(0, (start * HOLD) / LOOP, (end * HOLD) / LOOP);
+    }
+    // Hidden base value: a static render (no SMIL) shows an empty well rather
+    // than a pile of every cell that ever fills.
+    return (
+      `${el} opacity="0">` +
+      `<animate attributeName="opacity" values="${values}" keyTimes="${keys}" ` +
+      `dur="${LOOP}s" begin="0s" repeatCount="indefinite" calcMode="discrete"/></use>`
+    );
+  }
+
+  for (let idx = 0; idx < W * H; idx++) {
+    let start = 0;
+    let value = 0;
+    for (let i = 0; i <= frames; i++) {
+      // The stack under a frame is the board before its piece landed. That
+      // keeps the fall honest and survives the line-clear shift: the post-clear
+      // board has already collapsed, so using it here would move the piece.
+      const v = i < frames && i > 0 ? boards[i - 1][idx] : 0;
+      if (v === value) continue;
+      if (value) out.push(run(value, idx, start, i));
+      value = v;
+      start = i;
+    }
+  }
+  return out.join('');
+}
+
 let body = '';
 shots.forEach((shot, i) => {
-  const board = cells(shot);
   const an = shot.an;
   const a = i * HOLD;
   const b = a + HOLD - GAP;
-  const mine = new Set<number>();
-  if (an && an.kind === 'drop') {
-    for (const [cx, cy] of SHAPES[an.piece][an.rot]) {
-      const x = an.x + cx;
-      const y = an.y1 + cy;
-      if (x >= 0 && x < W && y >= 0 && y < H) mine.add(y * W + x);
-    }
-  }
-
   const parts: string[] = [];
-  for (let idx = 0; idx < board.length; idx++) {
-    const v = board[idx];
-    if (!v || mine.has(idx)) continue;
-    const x = idx % W;
-    const y = (idx / W) | 0;
-    parts.push(`<use href="#c${v}" x="${PAD + x * CELL}" y="${WELL_TOP + y * CELL}"/>`);
-  }
 
-  // The piece that just dropped: it must start ABOVE its landing spot (so it
-  // never flashes at its final resting place before falling). Its base
-  // transform is the top of the well; the fall is a keyTimes window inside the
-  // frame so it only happens once per loop.
-  if (an && an.kind === 'drop' && mine.size) {
-    const dy = an.y1 * CELL;
-    const falling = [...mine]
+  // The piece is drawn at its spawn row, so the base drawing is never at the
+  // landing spot: no pass of the loop and no paused animation can show a block
+  // sitting where it is about to land. The fall then translates it down.
+  if (an && an.kind === 'drop') {
+    const dy = (an.y1 - an.y0) * CELL;
+    const falling = SHAPES[an.piece][an.rot]
       .map(
-        (idx) =>
-          `<use href="#c${an.piece}" x="${PAD + (idx % W) * CELL}" y="${WELL_TOP + ((idx / W) | 0) * CELL}"/>`,
+        ([dx, dyy]) =>
+          `<use href="#c${an.piece}" x="${PAD + (an.x + dx) * CELL}" y="${WELL_TOP + (an.y0 + dyy) * CELL}"/>`,
       )
       .join('');
     const fs = (a + FALL_LEAD) / LOOP;
@@ -176,25 +216,41 @@ shots.forEach((shot, i) => {
     if (dy > 0) {
       parts.push(
         `<g><animateTransform attributeName="transform" type="translate" ` +
-          `values="0 ${-dy};0 ${-dy};0 0;0 0" keyTimes="${keyTimes(0, fs, fe, 1)}" ` +
+          `values="0 0;0 0;0 ${dy};0 ${dy}" keyTimes="${keyTimes(0, fs, fe, 1)}" ` +
           `dur="${LOOP}s" begin="0s" repeatCount="indefinite"/>${falling}</g>`,
       );
     } else {
       parts.push(falling);
     }
+
+    // The rows this piece completed, flashed where they were, then the next
+    // frame shows the board after they collapse.
+    if (an.cleared.length) {
+      parts.push(
+        an.cleared
+          .map(
+            (row) =>
+              `<rect x="${PAD}" y="${WELL_TOP + row * CELL}" width="${W * CELL}" height="${CELL}" fill="#eaffef" opacity="0">` +
+              `<animate attributeName="opacity" values="0;0.6;0" keyTimes="${keyTimes(0, fe, b / LOOP)}" ` +
+              `dur="${LOOP}s" begin="0s" repeatCount="indefinite"/></rect>`,
+          )
+          .join(''),
+      );
+    }
   }
 
   // Visibility window for this frame, looping. Frame 0 starts visible at t=0;
-  // every other frame is hidden until its window opens.
+  // every other frame is hidden until its window opens. Base opacity 0 means a
+  // frame whose animate is ever dropped stays hidden instead of painting a
+  // stale piece over the loop.
   const vis =
-    a === 0
+    i === 0
       ? `<animate attributeName="opacity" values="1;0" keyTimes="${keyTimes(0, b / LOOP)}" ` +
         `dur="${LOOP}s" begin="0s" repeatCount="indefinite" calcMode="discrete"/>`
       : `<animate attributeName="opacity" values="0;1;0" keyTimes="${keyTimes(0, a / LOOP, b / LOOP)}" ` +
         `dur="${LOOP}s" begin="0s" repeatCount="indefinite" calcMode="discrete"/>`;
 
-  body +=
-    `<g>${vis}${parts.join('')}${hudFrame(shot.ln, a)}</g>`;
+  body += `<g opacity="${i === 0 ? 1 : 0}">${vis}${parts.join('')}${hudFrame(shot.ln, a)}</g>`;
 });
 
 const svg =
@@ -202,6 +258,7 @@ const svg =
   `<defs>${symbol}</defs>` +
   `<rect width="${VW}" height="${VH}" fill="#061109"/>` +
   hudShell() +
+  boardLayer() +
   body +
   `</svg>`;
 

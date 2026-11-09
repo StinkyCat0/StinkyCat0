@@ -63,7 +63,10 @@ There are two views of the same profile, decided by whether the README carries a
 real 40-line sprint (a greedy height/holes/bumpiness bot): it plays until it clears
 40 lines, showing a progress bar toward 40L and an elapsed timer in the HUD, then the
 loop restarts on a fresh board. No state, no requests, no reloads. One button:
-`▶ let me play`.
+`▶ let me play`. The settled stack is emitted once, as per-cell opacity windows, so the
+file grows with moves rather than with frames x cells; each piece is drawn at its spawn
+row and translated down, so no frame — and no paused animation — paints a block at its
+landing spot before it drops.
 
 **play** — a live board for the human.
 
