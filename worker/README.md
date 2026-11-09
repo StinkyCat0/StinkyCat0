@@ -53,11 +53,14 @@ with no board in the README the worker treats the profile as the attract loop.
 
 ## The attract loop
 
-`attract.svg` is generated, not hand-made: `npm run attract` runs a greedy bot for 60
-pieces (height, holes, bumpiness, line clears), snapshots every position, and emits one
-SVG where each frame is a `<g>` with a visibility window and the new piece is animated
-down into place. 33s loop, ~67 KB. Regenerate it if the board styling changes; the file
-is committed and served by GitHub, so it costs the worker nothing.
+`attract.svg` is generated, not hand-made: `npm run attract` runs a greedy bot through a
+40-line sprint (height, holes, bumpiness, line clears), snapshots every position, and emits
+one SVG where each frame is a `<g>` with a looping visibility window and the new piece is
+animated down into place. A progress bar and elapsed timer in the HUD track the sprint, and
+the whole thing restarts on a fresh board when 40 lines clear. Every animation carries
+`repeatCount="indefinite"`, so it loops forever instead of playing once and going blank.
+Regenerate it if the board styling changes; the file is committed and served by GitHub, so
+it costs the worker nothing.
 
 ## Throttle
 

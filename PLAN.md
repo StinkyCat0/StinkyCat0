@@ -59,9 +59,11 @@ implies the bytes, caching it forever is free and correct.
 
 There are two views of the same profile, decided by whether the README carries a board:
 
-**attract** — the bot plays itself. `attract.svg` is a 33s SMIL loop of a real game (a
-greedy height/holes/bumpiness bot: 60 pieces, 20 lines, 2300 points), 67 KB, no state, no
-requests, no reloads. One button: `▶ let me play`.
+**attract** — the bot plays itself. `attract.svg` is a looping SMIL animation of a
+real 40-line sprint (a greedy height/holes/bumpiness bot): it plays until it clears
+40 lines, showing a progress bar toward 40L and an elapsed timer in the HUD, then the
+loop restarts on a fresh board. No state, no requests, no reloads. One button:
+`▶ let me play`.
 
 **play** — a live board for the human.
 
@@ -70,8 +72,9 @@ requests, no reloads. One button: `▶ let me play`.
   `◀ ▶` nudge a column, `↻` rotate, `▼` down one row, `⤓` slam it to the floor.
   A ghost piece shows where the slam would land.
 - Game over: the well dims with the run's lines and points, and the page offers
-  `▶ play again` and `◀ watch the bot`. A scheduled workflow pings `/w?if=over` every six
-  hours, so a finished game can never sit on the profile overnight.
+  `▶ play again` and `◀ watch the bot`. Mid-game, the same `◀ watch the bot` link sits
+  under the pad, so you can hand the board back at any time. A scheduled workflow pings
+  `/w?if=over` every six hours, so a finished game can never sit on the profile overnight.
 
 Keys cannot be real: a README runs no JavaScript, so no element can receive a keypress,
 and every click is a page load (~1.5s). The pad is honest about that — each key is one

@@ -212,6 +212,7 @@ test('let me play deals a fresh board with the whole pad', async () => {
   assert.ok(md.includes('/b/'), 'a live board now');
   for (const k of ['l', 'r', 'u', 'd', 's']) assert.ok(md.includes(`/k?k=${k}`), `key ${k}`);
   assert.equal((md.match(/\/m\?c=/g) ?? []).length, 10, 'ten columns');
+  assert.ok(md.includes('/w'), 'a way back to the bot is always there, mid-game too');
   const state = decodeState(payloadOf(md));
   assert.ok(state && !state.ov);
   assert.equal(state.mv, 0, 'a clean board');

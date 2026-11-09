@@ -75,7 +75,8 @@ export function buildReadme(template: string, state: State, base: string, profil
     ? `<p align="center"><sub>run over — ${state.ln} lines, ${state.sc} points.</sub></p>\n` +
       `<p align="center">${pill(`${base}/n`, '▶ play again', 'deal a fresh board')} · ` +
       `${pill(`${base}/w`, '◀ watch the bot', 'hand the board back to the bot')}</p>`
-    : pad(base);
+    : pad(base) +
+      `\n<p align="center">${pill(`${base}/w`, '◀ watch the bot', 'hand the board back to the bot')}</p>`;
 
   return fill(template, board, controls);
 }

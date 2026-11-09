@@ -18,6 +18,9 @@ Working list for the playable Tetris profile.
 - [x] Game over -> new game path verified end to end on staging
 - [x] Pixel-check the SVGs (spawn, stack, clear, game over) with cairosvg
 - [x] Docs: worker/README.md, PLAN.md, reset instructions
+- [x] Attract loop: 40-line sprint with progress bar + elapsed timer, loops forever
+- [x] Attract loop: piece no longer flashes at its landing spot before the fall
+- [x] "watch the bot" link available mid-game, not only on game over
 
 ## Next, if it earns it
 
