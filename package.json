@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "preview": "node --experimental-strip-types scripts/preview.ts",
     "dev": "npx wrangler dev",
     "deploy": "npx wrangler deploy",
     "logs": "npx wrangler tail"

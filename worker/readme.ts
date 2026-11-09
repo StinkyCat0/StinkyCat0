@@ -30,7 +30,7 @@ function keypad(base: string, over: boolean): string {
 export function buildReadme(template: string, state: State, base: string, profile: string): string {
   const payload = encodeState(state);
   const board =
-    `<p align="center"><a href="${profile}#board"><img src="${base}/b/${payload}.svg" width="264" ` +
+    `<p align="center"><a href="${profile}#board"><img src="${base}/b/${payload}.svg" width="300" ` +
     `alt="A game of Tetris — ${state.ln} lines, ${state.sc} points. Click a number below the board to drop the piece."></a></p>`;
 
   const controls = keypad(base, state.ov);
