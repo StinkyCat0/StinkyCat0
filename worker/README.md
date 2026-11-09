@@ -2,8 +2,12 @@
 
 The edge function behind every click on the board. One request per move:
 
-    /m?c=0..9   drop the current piece in that column
-    /r          rotate the current piece
+    /p          let me play: deal a fresh board for the human
+    /w          watch the bot: hand the board back to the attract loop
+                (?if=over makes it a no-op unless the game is finished)
+    /m?c=0..9   drop the current piece in that column (the fast path)
+    /k?k=l|r|u|d|s   pad key: left, right, rotate, down one row, slam
+    /r          rotate (what the pad's u key calls)
     /n          deal a new game
     /b/<state>.svg   the board image (the state is inside the URL)
     /health     ok
@@ -41,9 +45,19 @@ Point `GITHUB_REPO` at a throwaway repo while developing:
 
 ## Reset a game
 
-A game over board offers a `new game` link. To wipe a live game at any moment,
-hit `/n` yourself, or delete the board image reference from `README.md`: with no
-board in the README, the next move deals a fresh game from a random seed.
+A finished game offers `play again` and `watch the bot`; the scheduled workflow in
+`.github/workflows/attract.yml` also pings `/w?if=over` every six hours, so a game over
+screen cannot sit on the profile overnight. To wipe a live game immediately, hit `/w`, or
+`/p` for a fresh board. Deleting the board image reference from `README.md` also works:
+with no board in the README the worker treats the profile as the attract loop.
+
+## The attract loop
+
+`attract.svg` is generated, not hand-made: `npm run attract` runs a greedy bot for 60
+pieces (height, holes, bumpiness, line clears), snapshots every position, and emits one
+SVG where each frame is a `<g>` with a visibility window and the new piece is animated
+down into place. 33s loop, ~67 KB. Regenerate it if the board styling changes; the file
+is committed and served by GitHub, so it costs the worker nothing.
 
 ## Throttle
 
