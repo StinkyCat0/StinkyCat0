@@ -6,6 +6,8 @@ A real, playable Tetris in the profile README of github.com/StinkyCat0, sitting 
 top of the profile page. Visitors click to place pieces. No JavaScript runs in a README,
 so "playable" is built out of links, images and a small edge function.
 
+Live worker: https://stinky-tetris.antonio-devine111.workers.dev
+
 ## The constraint that shapes everything
 
 GitHub sanitizes README markdown. `style`, `onclick`, `<script>`, `<iframe>` are stripped:
@@ -19,90 +21,79 @@ So every move is:
 
     click a column link  ->  edge function  ->  commit new README  ->  302 back to profile
 
-The profile page reloads and the new board is there. A page reload per move is the ceiling
-in a README; the goal is to make the round trip small enough that it reads as deliberate
-rather than broken. Target: under ~2s from click to new board.
+A page reload per move is the ceiling in a README. Measured on the live worker: ~1.0-1.6s
+inside the worker (one GitHub read, one write), ~2.2s including the profile page load.
 
 ## Architecture
 
     README.md (top of profile)
-      <img src="https://tetris.<zone>/b/<hash>.svg">     <- board, content-addressed
-      | [<](rotate) [1][2][3][4][5][6][7][8][9][10] |   <- drop links, carry state
+      <img src="https://tetris.<zone>/b/<state>.svg">      <- board, content-addressed
+      [rotate]  [1][2][3][4][5] / [6][7][8][9][10]         <- drop links, no state needed
                 |
                 v
     Cloudflare Worker
-      - decodes game state from the link (HMAC-signed, so scores can't be forged)
-      - applies the move: rotate, or drop in column N
-      - renders board SVG at /b/<hash>.svg  (cache-friendly: URL changes with state)
-      - commits the new README.md via GitHub Contents API (sha-checked, retried)
-      - 302 -> github.com/StinkyCat0
+      - reads README.md from GitHub: it holds the current board
+      - applies the move, regenerates README.md, commits it with a sha guard
+      - serves /b/<state>.svg for any state, forever, immutable
+      - 302 -> github.com/StinkyCat0?b=<moves>  (the query defeats the page's CDN cache)
 
-### Why the state lives in the links
+### The README is the database
 
-The README has to be rewritten on every move anyway (the board image name changes), so
-there is no reason to keep a database. Each link carries the post-move state, signed.
-Consequences:
+The board image URL carries the whole game as base64url state. The worker reads the current
+state out of the README, applies the move, writes a new README. Nothing else is stored.
 
-- worker is stateless: no KV, no lock table, nothing to desync
-- the repo is the whole game: `README.md` + the SVG files are the audit log
-- no stale-read race: the Contents API update is sha-guarded, conflicts retry from the
-  fresh README
+- no database, no KV, nothing to desync; the commit history is the game log
+- the keypad links are static (`?c=0..9`, `/r`, `/n`), so a stale page cannot replay a move
+  against a board it does not belong to: the move is applied to whatever the README says
+- two clicks at once: the loser of the sha-guarded write re-reads the new board and retries,
+  so both land in order instead of one being eaten
 
-### Why content-addressed images
+### Why the board image is content-addressed
 
-GitHub proxies every README image through camo, which caches aggressively. A fixed URL
-like `/b/board.svg` would keep showing the old board. Naming the image after the state
-hash means a new move is always a new URL, so camo can never serve a stale board — and
-since the hash implies immutable content, caching is free.
+GitHub proxies every README image through camo, which caches hard. A fixed URL
+(`/b/board.svg`) would keep serving the first board. Naming the image after the state means
+every move is a new URL, so camo can never hand back a stale board — and since the state
+implies the bytes, caching it forever is free and correct.
 
-## Move model (one click per piece)
+## Move model
 
-- Board renders: settled stack + the falling piece at spawn + score/lines.
-- A control row under the well: `rotate` plus ten column targets.
-- Click a column: the piece slides to that column and drops. One click per piece.
-- Click rotate: the piece rotates one step and the board re-renders; then click a column.
-  That mirrors real keypresses (rotate, then place), it just costs a reload.
+- Board: 264x548 SVG — 10x20 well, HUD (score, lines, next), 1-10 ruler under the well.
+- One click per piece: click a column, the piece slides there and drops.
+- `rotate` reloads the board with the piece rotated, then you pick a column. That is
+  rotate-then-place, like the real keys, at the cost of one reload.
+- Game over: the well dims and shows lines and points; the keypad becomes `new game`.
 
-## Rules
+## Decisions
 
-- 10x20 well, 7-bag randomiser, fixed seed per game.
-- 4 rotation states (SRS piece shapes, no wall kicks needed since the piece only moves
-  by explicit column choice).
-- Line clear, gravity is "one piece at a time" (no timer: nothing runs between clicks).
-- Game over when a spawned piece cannot be placed; board shows the run result and a
-  `new game` link.
+- Hosting: Cloudflare Worker (free tier, edge, nothing to babysit).
+- Look: CRT terminal — phosphor green on near-black, scanlines, seven tints of green, glow.
+- Controls: column click + rotate, two rows of five. Ten cells in one row measured 320px
+  against a 293px phone container; five cells at 44px fits even a 320px screen.
+- No JavaScript, no iframe, no stylesheet: none of those survive a README.
 
-## Repo layout
+## What production taught us
 
-    README.md            the profile itself (rewritten by the worker each move)
-    board/<hash>.svg     the rendered boards (append-only game log)
-    game/engine.ts       tetris rules, pure and tested
-    game/render.ts       state -> SVG (terminal styling, SMIL drop + line-clear flash)
-    game/state.ts        encode/decode state, HMAC signing
-    worker/index.ts      Cloudflare Worker entry (routing, GitHub commit, redirects)
-    worker/README.md     deploy steps, secrets
-    test/               engine + render + state tests (node:test)
+- **The profile page has its own CDN cache.** A move could land and the visitor would still
+  reload the old page, which reads as a dead click. The redirect now carries `?b=<moves>`,
+  enough to miss the cached entry. Verified: the cache-busted page has the new board.
+- **Rotation must be normalised to each piece's own bounding box.** A vertical I keeps its
+  column at x=2 inside a 3-wide box, so it could never reach columns 1 and 2. Caught by a
+  line-clear test, not by looking at it.
+- Rasterising the SVG and checking pixels is the only way to verify it without eyes: spawn
+  piece lands in rows 0-1, a cleared line shifts the stack down exactly one row, nothing
+  bleeds outside the canvas.
 
-## Latency budget per move
+## Cost and guards
 
-    worker cold start        ~0-40ms   (edge)
-    Contents API commit      ~300-800ms
-    302 + profile load       ~400-900ms
-    camo fetch of new SVG    ~200-500ms (new URL, uncached once)
-    -------------------------------------
-    total                    ~1-2s
+- One commit per move, one read plus one write, one invocation, no storage.
+- Per-isolate throttle, 20 moves per IP per minute, best effort. A real limit belongs in a
+  Cloudflare WAF rule on `/m`, `/r`, `/n`.
+- If the GitHub write fails the visitor gets a small page linking back, not an error dump.
 
-## Guards
+## Open
 
-- Every move is HMAC-signed; a forged state (fake score) is rejected with a friendly page.
-- Column must be 0-9 and the reverse move must be legal, else no-op redirect.
-- Rate limit per IP (short window) and a global in-flight guard, so a script can't burn
-  the PAT's API quota or shotgun 500 commits.
-- If the GitHub call fails, redirect back to the profile with a `#log` note instead of
-  leaving the visitor on an error page.
-
-## Open questions
-
-- Hosting: Cloudflare Worker (planned) vs Vercel function.
-- Look: CRT green phosphor vs the site's obsidian/blue palette vs clean modern.
-- Profile copy: what the README says besides the game.
+- Per-visitor games are not possible: readme links are static, so everyone plays the same
+  board. Same model as the chess and shogi readmes — for a stacking game it means strangers
+  inherit your mess. Fine, or a feature, depending on the day.
+- A KV fast path could skip the README read (~300ms) and fall back to the slow path on a
+  409. Not worth the duplicated state yet.

@@ -188,6 +188,9 @@ export default {
       try {
         const next = await play(env, move, url.origin);
         if (!next) throw new Error('no write landed');
+        // The query string is there to beat the profile page's own CDN cache:
+        // a move that lands but reloads an old page reads as a dead click.
+        return Response.redirect(`${env.PROFILE_URL}?b=${next.mv}`, 302);
       } catch (err) {
         console.error('play failed', err);
         return page(
@@ -196,7 +199,6 @@ export default {
             `<p><a href="${env.PROFILE_URL}" style="color:#8ef7ac">back to the board</a></p>`,
         );
       }
-      return Response.redirect(env.PROFILE_URL, 302);
     }
 
     if (path === '/') return Response.redirect(env.PROFILE_URL, 302);

@@ -84,7 +84,9 @@ test('a first click starts a game and commits the README', async () => {
   seedRepo();
   const res = await visit('/m?c=4');
   assert.equal(res.status, 302);
-  assert.equal(res.headers.get('location'), env.PROFILE_URL);
+  const loc = res.headers.get('location') ?? '';
+  assert.ok(loc.startsWith(env.PROFILE_URL), 'sends the visitor back to the profile');
+  assert.match(loc, /\?b=\d+$/, 'with a cache-busting query so the new board is not a stale page');
 
   const md = await readme();
   assert.ok(md.includes('welcome to the stinkiest place'));
