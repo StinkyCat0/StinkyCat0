@@ -155,13 +155,13 @@ function bounce(env: Env, moves: number): Response {
 }
 
 /** Hand the board back to the bot. With onlyIfOver, a live human game is left alone. */
-async function toAttract(env: Env, base: string, onlyIfOver: boolean): Promise<boolean> {
+async function toAttract(env: Env, onlyIfOver: boolean): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const [readme, template] = await Promise.all([getFile(env, 'README.md'), getTemplate(env)]);
     const payload = readme ? extractStatePayload(readme.text) : null;
     const state = payload ? decodeState(payload) : null;
     if (onlyIfOver && state && !state.ov) return false;
-    const body = buildAttract(template, base, env.PROFILE_URL);
+    const body = buildAttract(template, env.PROFILE_URL);
     if (await putFile(env, 'README.md', body, readme?.sha ?? null, 'tetris: back to the attract loop')) {
       return true;
     }
@@ -255,7 +255,7 @@ export default {
     // game is finished, which is what the scheduled reset uses.
     if (path === '/w') {
       try {
-        await toAttract(env, url.origin, url.searchParams.get('if') === 'over');
+        await toAttract(env, url.searchParams.get('if') === 'over');
       } catch (err) {
         console.error('attract failed', err);
       }

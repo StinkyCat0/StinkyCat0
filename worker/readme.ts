@@ -31,15 +31,12 @@ function fill(template: string, board: string, controls: string): string {
     .concat('\n');
 }
 
-/** The bot playing by itself. No state, no clicks, no reloads. */
-export function buildAttract(template: string, base: string, profile: string): string {
+/** The bot playing by itself. No state, no clicks, no reloads, no way in. */
+export function buildAttract(template: string, profile: string): string {
   const board =
     `<p align="center"><img src="${ATTRACT_SRC}" width="200" ` +
     `alt="A bot playing Tetris on its own, looping"></p>`;
-  const controls =
-    `<p align="center"><sub>a bot is playing. the board is shared — take it over when you like.</sub></p>\n` +
-    `<p align="center">${pill(`${base}/p`, '▶ let me play', 'start a fresh game and take over the board')}</p>`;
-  return fill(template, board, controls).replaceAll('${PROFILE}', profile);
+  return fill(template, board, '').replaceAll('${PROFILE}', profile);
 }
 
 function pad(base: string): string {

@@ -2,7 +2,8 @@
 
 The edge function behind every click on the board. One request per move:
 
-    /p          let me play: deal a fresh board for the human
+    /p          deal a fresh board for the human (direct link only; the
+                profile card offers no way in)
     /w          watch the bot: hand the board back to the attract loop
                 (?if=over makes it a no-op unless the game is finished)
     /m?c=0..9   drop the current piece in that column (the fast path)

@@ -194,13 +194,14 @@ test('a broken board payload is a clean 404', async () => {
   assert.equal(res.status, 404);
 });
 
-test('the board starts as the bot playing itself, with one way in', async () => {
+test('the board starts as the bot playing itself, with no way in', async () => {
   seedRepo();
   const res = await visit('/w');
   assert.equal(res.status, 302);
   const md = await readme();
   assert.ok(md.includes('attract.svg'), 'the looping bot game is on the profile');
-  assert.ok(md.includes('/p'), 'and there is a let me play button');
+  assert.ok(!md.includes('/p"'), 'no way to take the board over from the profile');
+  assert.ok(!md.includes('board is shared'), 'no tagline inviting a takeover');
   assert.ok(!md.includes('/b/'), 'no live board image while the bot plays');
 });
 
