@@ -1,0 +1,2 @@
+# copy this to .dev.vars for local work, never commit the real one
+GITHUB_TOKEN=github_pat_local_only
