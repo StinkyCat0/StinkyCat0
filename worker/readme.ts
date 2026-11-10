@@ -1,18 +1,42 @@
-// The profile README is generated, never hand-edited. The copy comes from
-// README.template.md in the repo; the board and the controls are injected here.
+// Only the block between the markers belongs to the bot. Everything outside
+// them — the profile owner's text — is copied through byte for byte. If the
+// markers are missing, the worker refuses to write rather than guess.
 //
-// Two views:
+// Two views of the block:
 //   attract — the bot's looping game, plus one button to take over
 //   play    — a live board, a three-row pad, and a way back to the bot
 
 import type { State } from '../game/engine.ts';
 import { encodeState } from '../game/state.ts';
 
+export const BLOCK_START = '<!-- tetris:start -->';
+export const BLOCK_END = '<!-- tetris:end -->';
+
 const PAYLOAD_RE = /\/b\/([A-Za-z0-9_-]+)\.svg/;
 
+function blockScope(readme: string): string {
+  const start = readme.indexOf(BLOCK_START);
+  const end = readme.indexOf(BLOCK_END);
+  return start >= 0 && end > start ? readme.slice(start, end) : readme;
+}
+
 export function extractStatePayload(readme: string): string | null {
-  const m = readme.match(PAYLOAD_RE);
+  const m = blockScope(readme).match(PAYLOAD_RE);
   return m ? m[1] : null;
+}
+
+/** Replace only the marked block, leaving every other byte alone.
+ *  Returns null when the README has no markers — callers must not write then. */
+export function spliceBlock(readme: string, block: string): string | null {
+  const start = readme.indexOf(BLOCK_START);
+  const end = readme.indexOf(BLOCK_END);
+  if (start < 0 || end <= start) return null;
+  return readme.slice(0, start + BLOCK_START.length) + '\n' + block + '\n' + readme.slice(end);
+}
+
+/** A README that has no owner text yet: just the markers and the block. */
+export function emptyReadme(block: string): string {
+  return `${BLOCK_START}\n${block}\n${BLOCK_END}\n`;
 }
 
 /** stable URL for the committed attract loop, relative to the README */
@@ -22,21 +46,12 @@ function pill(href: string, label: string, title: string): string {
   return `<a href="${href}" title="${title}"><code>${label}</code></a>`;
 }
 
-function fill(template: string, board: string, controls: string): string {
-  return template
-    .replace('{{BOARD}}', board)
-    .replace('{{CONTROLS}}', controls)
-    .replace(/\n{3,}/g, '\n\n')
-    .trimEnd()
-    .concat('\n');
-}
-
 /** The bot playing by itself. No state, no clicks, no reloads, no way in. */
-export function buildAttract(template: string, profile: string): string {
-  const board =
+export function buildAttract(): string {
+  return (
     `<p align="center"><img src="${ATTRACT_SRC}" width="200" ` +
-    `alt="A bot playing Tetris on its own, looping"></p>`;
-  return fill(template, board, '').replaceAll('${PROFILE}', profile);
+    `alt="A bot playing Tetris on its own, looping"></p>`
+  );
 }
 
 function pad(base: string): string {
@@ -62,7 +77,7 @@ function pad(base: string): string {
   );
 }
 
-export function buildReadme(template: string, state: State, base: string, profile: string): string {
+export function buildReadme(state: State, base: string, profile: string): string {
   const payload = encodeState(state);
   const board =
     `<p align="center"><a href="${profile}#board"><img src="${base}/b/${payload}.svg" width="300" ` +
@@ -75,5 +90,5 @@ export function buildReadme(template: string, state: State, base: string, profil
     : pad(base) +
       `\n<p align="center">${pill(`${base}/w`, '◀ watch the bot', 'hand the board back to the bot')}</p>`;
 
-  return fill(template, board, controls);
+  return `${board}\n\n${controls}`;
 }

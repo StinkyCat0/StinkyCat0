@@ -2,9 +2,9 @@
 // read back what the profile would render.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 
 import worker from '../worker/index.ts';
+import { buildAttract } from '../worker/readme.ts';
 import { decodeState } from '../game/state.ts';
 
 const enc = (s: string) => Buffer.from(s, 'utf8').toString('base64');
@@ -51,10 +51,13 @@ const env = {
   PROFILE_URL: 'https://github.com/owner',
 };
 
-const template = readFileSync(new URL('../README.template.md', import.meta.url), 'utf8');
+const ownerText =
+  "my name is antwizzle welcome to my stinky palace, here's some 40L for your enjoyment check out my repos below!\n\nhmu!\n";
+const seedReadme =
+  `<!-- tetris:start -->\n${buildAttract()}\n<!-- tetris:end -->\n${ownerText}`;
 
 function seedRepo(): void {
-  store = new Map([['README.template.md', { content: template, sha: shaFor(0) }]]);
+  store = new Map([['README.md', { content: seedReadme, sha: shaFor(0) }]]);
   putCount = 0;
 }
 
@@ -90,12 +93,43 @@ test('a first click starts a game and commits the README', async () => {
   assert.match(loc, /\?b=\d+$/, 'with a cache-busting query so the new board is not a stale page');
 
   const md = await readme();
-  assert.ok(md.includes('welcome to the stinkiest place'));
-  assert.ok(md.includes('My name is Antonio Devine'));
+  assert.ok(md.endsWith(`<!-- tetris:end -->\n${ownerText}`), 'owner text outside the markers is untouched');
   assert.ok(md.includes('<table align="center">'), 'the keypad is there');
   assert.equal((md.match(/\/m\?c=/g) ?? []).length, 10, 'ten columns');
   assert.ok(md.includes('/k?k=u'), 'the rotate key is on the pad');
   assert.ok(md.includes('/k?k=s'), 'the slam key is on the pad');
+});
+
+test('play and attract writes never touch text outside the markers', async () => {
+  seedRepo();
+  const suffix = `<!-- tetris:end -->\n${ownerText}`;
+  await visit('/n');
+  assert.ok((await readme()).endsWith(suffix), 'new game');
+  await visit('/m?c=4');
+  assert.ok((await readme()).endsWith(suffix), 'move');
+  await visit('/w');
+  assert.ok((await readme()).endsWith(suffix), 'watch the bot');
+  await visit('/p');
+  assert.ok((await readme()).endsWith(suffix), 'take over');
+});
+
+test('a README with no markers is left alone, not rewritten', async () => {
+  store = new Map([['README.md', { content: ownerText, sha: shaFor(0) }]]);
+  putCount = 0;
+  const res = await visit('/m?c=4');
+  assert.equal(res.status, 200);
+  assert.ok((await res.text()).includes('did not land'));
+  assert.equal(store.get('README.md')!.content, ownerText);
+  assert.equal(putCount, 0, 'no write was attempted');
+});
+
+test('a scheduled reset on an already-attracted board writes nothing', async () => {
+  seedRepo();
+  const before = store.get('README.md')!.content;
+  const res = await visit('/w?if=over');
+  assert.equal(res.status, 302);
+  assert.equal(store.get('README.md')!.content, before);
+  assert.equal(putCount, 0, 'no no-op commit');
 });
 
 test('the board image renders and changes with every move', async () => {

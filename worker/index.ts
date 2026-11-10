@@ -1,12 +1,13 @@
-// The whole server: apply a move, commit the new README, send the visitor back
-// to the profile. The board lives in the README (as the image URL), so this
-// worker keeps no state of its own — and a lost update is just a retry.
+// The whole server: apply a move, replace the bot's marked block in README.md,
+// send the visitor back to the profile. The board lives in that block (as the
+// image URL), so this worker keeps no state of its own — and a lost update is
+// just a retry. Text outside the markers is never written.
 
 import { applyMove, newGame } from '../game/engine.ts';
 import type { Move, State } from '../game/engine.ts';
 import { renderBoard } from '../game/render.ts';
 import { decodeState, randomSeed } from '../game/state.ts';
-import { buildAttract, buildReadme, extractStatePayload } from './readme.ts';
+import { buildAttract, buildReadme, emptyReadme, extractStatePayload, spliceBlock } from './readme.ts';
 
 interface Env {
   GITHUB_TOKEN: string;
@@ -79,16 +80,6 @@ async function putFile(
   return true;
 }
 
-let templateCache: { text: string; at: number } | null = null;
-
-async function getTemplate(env: Env): Promise<string> {
-  if (templateCache && Date.now() - templateCache.at < 300_000) return templateCache.text;
-  const file = await getFile(env, 'README.template.md');
-  const text = file?.text ?? '{{BOARD}}\n\n{{CONTROLS}}\n';
-  templateCache = { text, at: Date.now() };
-  return text;
-}
-
 function describe(move: Move, next: State): string {
   if (move.type === 'new') return 'tetris: new game';
   if (move.type === 'rot') return `tetris: rotate ${next.p}`;
@@ -105,14 +96,15 @@ function describe(move: Move, next: State): string {
 async function play(env: Env, move: Move, base: string): Promise<State | null> {
   let last: State | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const [readme, template] = await Promise.all([
-      getFile(env, 'README.md'),
-      getTemplate(env),
-    ]);
+    const readme = await getFile(env, 'README.md');
     const payload = readme ? extractStatePayload(readme.text) : null;
     const prev = (payload && decodeState(payload)) || newGame(randomSeed());
     const next = applyMove(prev, move);
-    const body = buildReadme(template, next, base, env.PROFILE_URL);
+    const block = buildReadme(next, base, env.PROFILE_URL);
+    const body = readme ? spliceBlock(readme.text, block) : emptyReadme(block);
+    // No markers means this is not a README the bot owns. Refuse to write
+    // rather than replace the owner's text.
+    if (body === null) throw new Error('README.md has no tetris markers');
     if (await putFile(env, 'README.md', body, readme?.sha ?? null, describe(move, next))) {
       return next;
     }
@@ -157,12 +149,15 @@ function bounce(env: Env, moves: number): Response {
 /** Hand the board back to the bot. With onlyIfOver, a live human game is left alone. */
 async function toAttract(env: Env, onlyIfOver: boolean): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const [readme, template] = await Promise.all([getFile(env, 'README.md'), getTemplate(env)]);
-    const payload = readme ? extractStatePayload(readme.text) : null;
+    const readme = await getFile(env, 'README.md');
+    if (!readme) return false;
+    const payload = extractStatePayload(readme.text);
     const state = payload ? decodeState(payload) : null;
     if (onlyIfOver && state && !state.ov) return false;
-    const body = buildAttract(template, env.PROFILE_URL);
-    if (await putFile(env, 'README.md', body, readme?.sha ?? null, 'tetris: back to the attract loop')) {
+    const body = spliceBlock(readme.text, buildAttract());
+    if (body === null) return false;
+    if (body === readme.text) return true;
+    if (await putFile(env, 'README.md', body, readme.sha, 'tetris: back to the attract loop')) {
       return true;
     }
     await new Promise((r) => setTimeout(r, 110));

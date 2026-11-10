@@ -33,14 +33,16 @@ inside the worker (one GitHub read, one write), ~2.2s including the profile page
                 v
     Cloudflare Worker
       - reads README.md from GitHub: it holds the current board
-      - applies the move, regenerates README.md, commits it with a sha guard
+      - applies the move, replaces only the <!-- tetris:start --> block, commits it
+        with a sha guard; text outside the markers is never written
       - serves /b/<state>.svg for any state, forever, immutable
       - 302 -> github.com/StinkyCat0?b=<moves>  (the query defeats the page's CDN cache)
 
 ### The README is the database
 
 The board image URL carries the whole game as base64url state. The worker reads the current
-state out of the README, applies the move, writes a new README. Nothing else is stored.
+state out of the marked block, applies the move, and rewrites only that block. Nothing else
+is stored.
 
 - no database, no KV, nothing to desync; the commit history is the game log
 - the keypad links are static (`?c=0..9`, `/r`, `/n`), so a stale page cannot replay a move

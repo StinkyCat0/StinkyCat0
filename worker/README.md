@@ -14,9 +14,18 @@ The edge function behind every click on the board. One request per move:
     /health     ok
 
 Each move: read `README.md` from GitHub, pull the board out of the board image
-URL, apply the move locally, regenerate the README, commit it with a sha guard,
+URL, apply the move locally, replace only the block between
+`<!-- tetris:start -->` and `<!-- tetris:end -->`, commit it with a sha guard,
 then 302 the visitor back to the profile. There is no database: the committed
 README is the game.
+
+## Text ownership
+
+Everything outside the markers is the profile owner's text and is copied through
+byte for byte: every commit changes the marked block only. If the markers are
+missing, the worker refuses to write and the move fails visibly — it never falls
+back to rewriting the file. Keep the intro, links and anything else you care
+about outside the markers; the bot will not touch it.
 
 ## Deploy
 
@@ -49,8 +58,8 @@ Point `GITHUB_REPO` at a throwaway repo while developing:
 A finished game offers `play again` and `watch the bot`; the scheduled workflow in
 `.github/workflows/attract.yml` also pings `/w?if=over` every six hours, so a game over
 screen cannot sit on the profile overnight. To wipe a live game immediately, hit `/w`, or
-`/p` for a fresh board. Deleting the board image reference from `README.md` also works:
-with no board in the README the worker treats the profile as the attract loop.
+`/p` for a fresh board. With no board state inside the markers, the next move deals a fresh
+game; the owner's text outside the markers is still left alone.
 
 ## The attract loop
 
