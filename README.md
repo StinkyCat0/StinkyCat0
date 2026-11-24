@@ -8,3 +8,5 @@
 durable objects are the future welcome to my palace, here's some 40L for your enjoyment check out my repos below!
 
 hmu!
+
+I'm interested in computer vision, service business QOL utilities, and pirating
